@@ -5,7 +5,7 @@ targetPath = "./dataset/targetPointcloud.xyz"
 basePath = "./dataset/basePointcloud.xyz"
 targetData = []
 baseData = []
-count = 9000
+count = 400000
 for i in tqdm(range(count)):
     vec = np.random.rand(3)
     targetData.append(vec.tolist())

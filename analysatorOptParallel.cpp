@@ -10,7 +10,7 @@ int main(void){
     ifstream baseFile(basePath);
     ifstream targetFile(targetPath);
     clock_t start,end;
-    int dev = 3;
+    int dev = 1;
 
     float serialRes;
     float basicParaRes;

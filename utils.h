@@ -4,7 +4,7 @@
 #include <fstream>
 #include <sys/time.h>
 #include <unistd.h>
-#define CLOUDSIZE 9000
+#define CLOUDSIZE 2048
 typedef struct
 {
     float x;

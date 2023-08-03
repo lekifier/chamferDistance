@@ -1,11 +1,14 @@
 #include "optParallel.h"
+#include <iostream>
+using namespace std;
 //o(1)
 __global__ void optNormKernel(Point* d_basePointCloud, Point* d_targetPointCloud, float* d_normArray){
     int indexBase = blockIdx.x*blockDim.x+threadIdx.x;
     int indexTarget = blockIdx.y*blockDim.y+threadIdx.y;
-    d_normArray[indexBase*CLOUDSIZE+indexTarget] = norm3d(d_basePointCloud[indexBase].x-d_targetPointCloud[indexTarget].x,\
-                                                          d_basePointCloud[indexBase].y-d_targetPointCloud[indexTarget].y,\
-                                                          d_basePointCloud[indexBase].z-d_targetPointCloud[indexTarget].z);
+    d_normArray[indexBase*CLOUDSIZE+indexTarget] =\
+    norm3d(d_basePointCloud[indexBase].x-d_targetPointCloud[indexTarget].x,\
+           d_basePointCloud[indexBase].y-d_targetPointCloud[indexTarget].y,\
+           d_basePointCloud[indexBase].z-d_targetPointCloud[indexTarget].z);
 }
 //o(logn)
 __global__ void optMinKernel(float* d_normArray, float* d_minArray){
@@ -16,22 +19,16 @@ __global__ void optMinKernel(float* d_normArray, float* d_minArray){
     unsigned int t = threadIdx.y;
     unsigned int start = 2*blockIdx.y*blockDim.y;
     //loading data from global memory to share memory
-    if(start+blockDim.y+t >= CLOUDSIZE)[[unlikely]]{
-        partialMin[threadIdx.x][t] = d_normArray[rowIndex*CLOUDSIZE + start+t];
-        partialMin[threadIdx.x][blockDim.y+t] = 1;
-    }
-    else{
-        partialMin[threadIdx.x][t] = d_normArray[rowIndex*CLOUDSIZE + start+t];
-        partialMin[threadIdx.x][blockDim.y+t] = d_normArray[rowIndex*CLOUDSIZE + start+blockDim.y+t];
-        //compute
-        for(unsigned int stride = blockDim.y; stride > 0; stride >>= 1){
-            __syncthreads();
-            //if t % stride == 0 the thread will run the computation
-            if(t < stride &&partialMin[threadIdx.x][t] > partialMin[threadIdx.x][t+stride])
-                partialMin[threadIdx.x][t] = partialMin[threadIdx.x][t+stride];
-        } 
+    partialMin[threadIdx.x][t] = d_normArray[rowIndex*CLOUDSIZE + start+t];
+    partialMin[threadIdx.x][blockDim.y+t] = d_normArray[rowIndex*CLOUDSIZE + start+blockDim.y+t];
+    //compute
+    for(unsigned int stride = blockDim.y; stride > 0; stride >>= 1){
+        __syncthreads();
+        //if t % stride == 0 the thread will run the computation
+        if(t < stride &&partialMin[threadIdx.x][t] > partialMin[threadIdx.x][t+stride])
+            partialMin[threadIdx.x][t] = partialMin[threadIdx.x][t+stride];
     } 
-    if(t==0&&rowIndex<CLOUDSIZE)[[likely]] d_minArray[rowIndex*(CLOUDSIZE/PARTIAlBLOCKSIZE+1)+blockIdx.y] = partialMin[threadIdx.x][0];
+    if(t==0) d_minArray[rowIndex*(CLOUDSIZE/PARTIAlBLOCKSIZE+1)+blockIdx.y] = partialMin[threadIdx.x][0];
 }
 //o(1)
 __global__ void optFixMinKernel(float* d_minArray, float* d_minFixMinArray){
@@ -54,7 +51,6 @@ __global__ void optSumKernel(float* d_minArray, float* d_basicParaResList){
     //compute
     for(unsigned int stride = blockDim.x; stride > 0; stride >>= 1){
         __syncthreads();
-        //if t % stride == 0 the thread will run the computation
         if(t < stride)
             partialSum[t] += partialSum[t+stride];
     } 
@@ -89,24 +85,28 @@ void optParaCompute(Point* basePointcloud, Point* targetPointcloud, float* basic
 
     //kernel
     //compute 2-Norm
-    dim3 normDimGrid(CLOUDSIZE/PARTIAlBLOCKSIZE+1,CLOUDSIZE/PARTIAlBLOCKSIZE+1,1);
-    dim3 normDimBlock(PARTIAlBLOCKSIZE,PARTIAlBLOCKSIZE,1);
+    dim3 normDimBlock(PARTIAlBLOCKSIZE,PARTIAlBLOCKSIZE);
+    dim3 normDimGrid((CLOUDSIZE + normDimBlock.x - 1) / normDimBlock.x, (CLOUDSIZE + normDimBlock.y - 1) / normDimBlock.y);
     optNormKernel <<< normDimGrid, normDimBlock >>> (d_basePointcloud,d_targetPointcloud,d_normArray);
     cudaMemcpy(normArray, d_normArray,CLOUDSIZE*CLOUDSIZE*sizeof(float), cudaMemcpyDeviceToHost);
+    for(int i=0; i<40; i++) cout << normArray[i]<<" ";
+    cout << endl;
     //compute min of norm array
-    dim3 minDimGrid(CLOUDSIZE/PARTIAlBLOCKSIZE+1,CLOUDSIZE/PARTIAlBLOCKSIZE+1,1);
-    dim3 minDimBlock(PARTIAlBLOCKSIZE,PARTIAlBLOCKSIZE,1);
+    dim3 minDimBlock(PARTIAlBLOCKSIZE,PARTIAlBLOCKSIZE);
+    dim3 minDimGrid((CLOUDSIZE + minDimBlock.x - 1) / minDimBlock.x);
     optMinKernel <<< minDimGrid, minDimBlock >>> (d_normArray, d_minArray);
     cudaMemcpy(minArray, d_minArray, CLOUDSIZE*(CLOUDSIZE/PARTIAlBLOCKSIZE+1)*sizeof(float), cudaMemcpyDeviceToHost);
+    for(int i=0; i<40; i++) cout << minArray[i]<<" ";
+    cout << endl;
     //fix min of norm array
-    dim3 fixMinDimGrid(CLOUDSIZE/PARTIAlBLOCKSIZE+1,1,1);
-    dim3 fixMinDimBlock(PARTIAlBLOCKSIZE,1,1);
+    dim3 fixMinDimBlock(PARTIAlBLOCKSIZE);
+    dim3 fixMinDimGrid((CLOUDSIZE+fixMinDimBlock.x-1)/fixMinDimBlock.x);
     optFixMinKernel <<< fixMinDimGrid, fixMinDimBlock >>> (d_minArray, d_fixMinArray);
     cudaMemcpy(fixMinArray, d_fixMinArray, CLOUDSIZE*sizeof(float), cudaMemcpyDeviceToHost);
 
     //compute sum
-    dim3 sumDimGrid(CLOUDSIZE/PARTIAlBLOCKSIZE+1,1,1);
-    dim3 sumDimBlock(PARTIAlBLOCKSIZE,1,1);
+    dim3 sumDimBlock(PARTIAlBLOCKSIZE);
+    dim3 sumDimGrid((CLOUDSIZE+sumDimBlock.x-1)/sumDimBlock.x);
     optSumKernel <<< sumDimGrid, sumDimBlock>>> (d_fixMinArray, d_basicParaResList);
     cudaMemcpy(resList, d_basicParaResList, (CLOUDSIZE/PARTIAlBLOCKSIZE+1)*sizeof(float), cudaMemcpyDeviceToHost);
     

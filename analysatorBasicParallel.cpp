@@ -2,7 +2,7 @@
 #include "basicParallel.h"
 using namespace std;
 
-int main(void){
+int main(){
     string basePath = "./dataset/basePointcloud.xyz";
     string targetPath = "./dataset/targetPointcloud.xyz";
     Point basePointCloud[CLOUDSIZE];
@@ -10,7 +10,7 @@ int main(void){
     ifstream baseFile(basePath);
     ifstream targetFile(targetPath);
     clock_t start,end;
-    int dev = 3;
+    int dev = 1;
 
     float serialRes;
     float basicParaRes;
